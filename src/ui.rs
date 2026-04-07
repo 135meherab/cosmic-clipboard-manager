@@ -1,9 +1,10 @@
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use iced::{
-    event, keyboard,
+    event, keyboard, time,
     widget::{column, container, image as iced_image, row, scrollable, text, text_input, Column},
     Alignment, Background, Border, Color, Element, Event, Length, Size, Subscription, Task, Theme,
 };
+use std::time::Duration;
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 
@@ -62,6 +63,7 @@ pub enum Msg {
     DeleteSelected,
     PinSelected,
     Close,
+    Tick,
     EventOccurred(Event),
 }
 
@@ -97,7 +99,9 @@ impl ClipApp {
         match msg {
             Msg::Loaded(entries) => {
                 self.entries = entries;
-                self.selected = 0;
+                // Clamp selection so it stays valid after new items arrive
+                let max = self.filtered().len().saturating_sub(1);
+                self.selected = self.selected.min(max);
                 Task::none()
             }
             Msg::SearchChanged(s) => {
@@ -141,6 +145,9 @@ impl ClipApp {
                 Task::perform(load_entries(self.db.clone()), Msg::Loaded)
             }
             Msg::Close => iced::exit(),
+            Msg::Tick => {
+                return Task::perform(load_entries(self.db.clone()), Msg::Loaded);
+            }
             Msg::EventOccurred(Event::Keyboard(keyboard::Event::KeyPressed { key, .. })) => {
                 match key {
                     keyboard::Key::Named(keyboard::key::Named::ArrowDown) => {
@@ -169,7 +176,10 @@ impl ClipApp {
     }
 
     pub fn subscription(&self) -> Subscription<Msg> {
-        event::listen().map(Msg::EventOccurred)
+        Subscription::batch([
+            event::listen().map(Msg::EventOccurred),
+            time::every(Duration::from_millis(500)).map(|_| Msg::Tick),
+        ])
     }
 
     pub fn view(&self) -> Element<'_, Msg> {
