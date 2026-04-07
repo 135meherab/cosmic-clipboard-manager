@@ -1,9 +1,8 @@
-# clipmgr — Clipboard Manager for Linux
+# cosmic-clipboard-manager
 
 A lightweight, fast clipboard history manager built in Rust for Pop OS / COSMIC and other Linux desktops.
 
-[![CI](https://github.com/YOUR_USERNAME/clipmgr/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/clipmgr/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/YOUR_USERNAME/clipmgr)](https://github.com/YOUR_USERNAME/clipmgr/releases/latest)
+[![Release](https://img.shields.io/github/v/release/135meherab/cosmic-clipboard-manager)](https://github.com/135meherab/cosmic-clipboard-manager/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ## Features
@@ -20,7 +19,7 @@ A lightweight, fast clipboard history manager built in Rust for Pop OS / COSMIC 
 
 ### Option 1 — Download `.deb` (easiest)
 
-Go to the [Releases page](https://github.com/YOUR_USERNAME/clipmgr/releases/latest) and download the latest `.deb`, then:
+Go to the [Releases page](https://github.com/135meherab/cosmic-clipboard-manager/releases/latest) and download the latest `.deb`, then:
 
 ```bash
 sudo apt install ./clipmgr_v*.deb
@@ -45,8 +44,8 @@ sudo apt install -y \
 
 **Build & install:**
 ```bash
-git clone https://github.com/YOUR_USERNAME/clipmgr.git
-cd clipmgr
+git clone https://github.com/135meherab/cosmic-clipboard-manager.git
+cd cosmic-clipboard-manager
 ./build-deb.sh
 sudo apt install ./target/debian/clipmgr_*.deb
 ```
@@ -88,8 +87,8 @@ sudo apt remove clipmgr
 Pull requests are welcome. For major changes, please open an issue first.
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/clipmgr.git
-cd clipmgr
+git clone https://github.com/135meherab/cosmic-clipboard-manager.git
+cd cosmic-clipboard-manager
 source ~/.cargo/env
 cargo check
 cargo run
