@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"          # triggers on: git tag v0.1.0 && git push --tags
+
+permissions:
+  contents: write   # needed to create GitHub Releases
+
+jobs:
+  build-deb:
+    name: Build .deb and publish release
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            libdbus-1-dev pkg-config \
+            libwayland-dev libxkbcommon-dev \
+            libvulkan-dev libgl-dev libegl-dev \
+            libxi-dev libxtst-dev libx11-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
+
+      - name: Build .deb package
+        run: cargo deb
+
+      - name: Rename .deb with version tag
+        run: |
+          TAG=${GITHUB_REF_NAME}
+          DEB=$(ls target/debian/clipmgr_*.deb | head -1)
+          NEW_NAME="clipmgr_${TAG}_amd64.deb"
+          cp "$DEB" "$NEW_NAME"
+          echo "DEB_PATH=$NEW_NAME" >> $GITHUB_ENV
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "clipmgr ${{ github.ref_name }}"
+          body: |
+            ## clipmgr ${{ github.ref_name }}
+
+            A lightweight clipboard history manager for Linux (Pop OS / COSMIC / Ubuntu).
+
+            ### Install
+
+            **Quick install (recommended):**
+            ```bash
+            sudo apt install ./clipmgr_${{ github.ref_name }}_amd64.deb
+            ```
+
+            **Or with dpkg:**
+            ```bash
+            sudo dpkg -i clipmgr_${{ github.ref_name }}_amd64.deb
+            sudo apt-get install -f   # fix any missing deps
+            ```
+
+            ### Requirements
+            - Ubuntu 22.04+ / Pop OS 22.04+ (amd64)
+            - Wayland or X11
+
+            ### Uninstall
+            ```bash
+            sudo apt remove clipmgr
+            ```
+          files: ${{ env.DEB_PATH }}
+          draft: false
+          prerelease: false

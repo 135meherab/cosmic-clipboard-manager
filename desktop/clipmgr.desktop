@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Clipboard Manager
+Comment=System clipboard history manager
+Exec=clipmgr
+Icon=edit-paste
+Type=Application
+Categories=Utility;
+Keywords=clipboard;copy;paste;history;
+StartupNotify=false
+NoDisplay=false
