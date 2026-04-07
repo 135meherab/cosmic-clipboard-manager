@@ -11,6 +11,31 @@ use tracing::info;
 use db::Db;
 use tray::TrayAction;
 
+const PID_FILE: &str = "/tmp/clipmgr.pid";
+
+/// Write our PID to the pid file.
+fn write_pid() {
+    let pid = std::process::id();
+    let _ = std::fs::write(PID_FILE, pid.to_string());
+}
+
+/// Remove the pid file on clean exit.
+fn remove_pid() {
+    let _ = std::fs::remove_file(PID_FILE);
+}
+
+/// Returns true if the daemon process recorded in the pid file is alive.
+fn daemon_is_running() -> bool {
+    let Ok(contents) = std::fs::read_to_string(PID_FILE) else {
+        return false;
+    };
+    let Ok(pid) = contents.trim().parse::<u32>() else {
+        return false;
+    };
+    // kill -0 checks existence without sending a signal
+    unsafe { libc::kill(pid as i32, 0) == 0 }
+}
+
 fn main() {
     // Logging
     use tracing_subscriber::EnvFilter;
@@ -22,9 +47,15 @@ fn main() {
         .init();
 
     // Handle --show flag: open window against the shared DB.
-    // Useful for COSMIC custom keybinding: set command to `clipmgr --show`
+    // If the daemon isn't running, start it first so the tray icon appears.
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(|s| s.as_str()) == Some("--show") {
+        if !daemon_is_running() {
+            // Start the daemon in the background then wait for its tray to register.
+            let exe = std::env::current_exe().unwrap_or_else(|_| "clipmgr".into());
+            let _ = std::process::Command::new(&exe).spawn();
+            std::thread::sleep(std::time::Duration::from_millis(800));
+        }
         let db = Arc::new(Mutex::new(Db::open().expect("DB open failed")));
         ui::run(db).expect("UI failed");
         return;
@@ -41,6 +72,8 @@ fn main() {
 
 async fn async_main() {
     info!("clipmgr starting…");
+
+    write_pid();
 
     let db = Arc::new(Mutex::new(Db::open().expect("Failed to open database")));
 
@@ -92,6 +125,7 @@ async fn async_main() {
                     }
                     TrayAction::Quit => {
                         info!("Quitting.");
+                        remove_pid();
                         std::process::exit(0);
                     }
                 }
