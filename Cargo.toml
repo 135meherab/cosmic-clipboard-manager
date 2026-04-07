@@ -21,11 +21,14 @@ priority = "optional"
 assets = [
     # Binary
     ["target/release/clipmgr", "usr/bin/clipmgr", "755"],
-    # Desktop entry (shown in app launcher)
+    # Desktop entry (shown in app launcher / quick search)
     ["desktop/clipmgr.desktop", "usr/share/applications/clipmgr.desktop", "644"],
-    # Autostart entry (starts on login)
+    # Autostart entry (starts daemon on login)
     ["desktop/clipmgr-autostart.desktop", "etc/xdg/autostart/clipmgr.desktop", "644"],
+    # Icon (hicolor scalable — used by launcher, tray, quick search)
+    ["assets/clipmgr.svg", "usr/share/icons/hicolor/scalable/apps/clipmgr.svg", "644"],
 ]
+maintainer-scripts = "desktop/"
 
 [[bin]]
 name = "clipmgr"
