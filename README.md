@@ -3,8 +3,6 @@
 A lightweight, fast clipboard history manager built in Rust for Pop OS / COSMIC and other Linux desktops.
 
 [![Release](https://img.shields.io/github/v/release/135meherab/cosmic-clipboard-manager)](https://github.com/135meherab/cosmic-clipboard-manager/releases/latest)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-
 ## Features
 
 - **Text & image history** — captures everything you copy
@@ -93,7 +91,3 @@ source ~/.cargo/env
 cargo check
 cargo run
 ```
-
-## License
-
-[MIT](LICENSE)
