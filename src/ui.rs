@@ -301,7 +301,7 @@ fn clip_row(entry: &ClipEntry, selected: bool) -> Element<'_, Msg> {
         text("").size(8).into()
     };
 
-    let time = text(entry.created_at.format("%H:%M").to_string())
+    let time = text(entry.created_at.with_timezone(&chrono::Local).format("%H:%M").to_string())
         .size(11)
         .color(TEXT_DIM);
 
