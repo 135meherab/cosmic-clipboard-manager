@@ -54,6 +54,8 @@ async fn async_main() {
     clipboard_monitor::start(db.clone(), clip_tx);
     info!("Clipboard monitor started");
 
+    // Small delay so COSMIC's StatusNotifierWatcher is fully ready before we register
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     tray::start(db.clone(), tray_tx);
     info!("System tray started");
 

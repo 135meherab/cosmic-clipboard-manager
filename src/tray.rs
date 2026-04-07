@@ -25,13 +25,12 @@ impl Tray for ClipTray {
     }
 
     fn icon_name(&self) -> String {
-        // Uses a standard freedesktop icon; falls back gracefully
-        "edit-paste".into()
+        "edit-paste-symbolic".into()
     }
 
     fn tool_tip(&self) -> ksni::ToolTip {
         ksni::ToolTip {
-            icon_name: "edit-paste".into(),
+            icon_name: "edit-paste-symbolic".into(),
             icon_pixmap: vec![],
             title: "Clipboard Manager".into(),
             description: "Click to open clipboard history".into(),
