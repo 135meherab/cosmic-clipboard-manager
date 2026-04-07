@@ -13,9 +13,10 @@ use tray::TrayAction;
 
 fn main() {
     // Logging
+    use tracing_subscriber::EnvFilter;
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
+            EnvFilter::from_default_env()
                 .add_directive("clipmgr=info".parse().unwrap()),
         )
         .init();
@@ -53,24 +54,21 @@ async fn async_main() {
     clipboard_monitor::start(db.clone(), clip_tx);
     info!("Clipboard monitor started");
 
-    let tray_service = tray::start(db.clone(), tray_tx);
-    let tray_handle = tray_service.spawn();
+    tray::start(db.clone(), tray_tx);
     info!("System tray started");
 
     let _hotkey_mgr = hotkey::register(hotkey_tx);
 
     info!("Running. Press Super+V or click the tray icon to open.");
 
-    let db_ui = db.clone();
     loop {
         tokio::select! {
             Some(event) = clip_rx.recv() => {
-                tray_handle.update(|_t| {});
                 match event {
                     clipboard_monitor::ClipEvent::NewText(t) => {
                         info!("Saved text: {}…", &t[..t.len().min(40)]);
                     }
-                    clipboard_monitor::ClipEvent::NewImage(_) => {
+                    clipboard_monitor::ClipEvent::NewImage => {
                         info!("Saved image");
                     }
                 }
@@ -78,16 +76,16 @@ async fn async_main() {
             Some(action) = tray_rx.recv() => {
                 match action {
                     TrayAction::ShowWindow => {
-                        let db2 = db_ui.clone();
-                        std::thread::spawn(move || {
-                            ui::run(db2).expect("UI error");
-                        });
+                        let _ = std::process::Command::new(
+                            std::env::current_exe().unwrap_or_else(|_| "clipmgr".into()),
+                        )
+                        .arg("--show")
+                        .spawn();
                     }
                     TrayAction::ClearHistory => {
                         if let Ok(db) = db.lock() {
                             let _ = db.clear_unpinned();
                         }
-                        tray_handle.update(|_t| {});
                         info!("History cleared");
                     }
                     TrayAction::Quit => {
@@ -97,10 +95,11 @@ async fn async_main() {
                 }
             }
             Some(()) = hotkey_rx.recv() => {
-                let db2 = db_ui.clone();
-                std::thread::spawn(move || {
-                    ui::run(db2).expect("UI error");
-                });
+                let _ = std::process::Command::new(
+                    std::env::current_exe().unwrap_or_else(|_| "clipmgr".into()),
+                )
+                .arg("--show")
+                .spawn();
             }
         }
     }

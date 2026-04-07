@@ -10,7 +10,7 @@ use crate::db::{ClipKind, Db};
 #[derive(Debug, Clone)]
 pub enum ClipEvent {
     NewText(String),
-    NewImage(String), // base64 PNG
+    NewImage, // base64 already saved to DB
 }
 
 /// Spawns a blocking thread that polls the clipboard every `interval_ms` ms.
@@ -68,7 +68,7 @@ pub fn start(db: Arc<std::sync::Mutex<Db>>, tx: mpsc::UnboundedSender<ClipEvent>
                             if let Err(e) = db.insert(ClipKind::Image, &b64, &preview) {
                                 warn!("DB insert image error: {e}");
                             } else {
-                                let _ = tx.send(ClipEvent::NewImage(b64));
+                                let _ = tx.send(ClipEvent::NewImage);
                             }
                         }
                     }

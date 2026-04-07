@@ -73,16 +73,17 @@ impl Tray for ClipTray {
     }
 
     fn activate(&mut self, _x: i32, _y: i32) {
-        let _ = self.tx.send(TrayAction::ShowWindow);
+        // Spawn clipmgr --show as a child process so iced runs on its own main thread
+        let _ = std::process::Command::new(
+            std::env::current_exe().unwrap_or_else(|_| "clipmgr".into()),
+        )
+        .arg("--show")
+        .spawn();
     }
 }
 
-/// Starts the system tray in its own thread. Returns a handle that can be used
-/// to update the tray (e.g., refresh the item count).
-pub fn start(
-    db: Arc<Mutex<Db>>,
-    tx: mpsc::UnboundedSender<TrayAction>,
-) -> TrayService<ClipTray> {
+/// Starts the system tray in its own background thread.
+pub fn start(db: Arc<Mutex<Db>>, tx: mpsc::UnboundedSender<TrayAction>) {
     let tray = ClipTray { tx, db };
-    TrayService::new(tray)
+    TrayService::new(tray).spawn();
 }

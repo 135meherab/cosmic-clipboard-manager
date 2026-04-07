@@ -123,14 +123,19 @@ impl Db {
         Ok(())
     }
 
-    /// Returns true if the most recent entry already has this content (dedup).
+    /// Returns true only if the most recent entry has this exact content.
+    /// Prevents consecutive duplicates but allows re-copying something from further back.
     pub fn is_duplicate(&self, content: &str) -> Result<bool> {
-        let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM clips WHERE content = ?1 ORDER BY created_at DESC LIMIT 1",
-            params![content],
+        let result: rusqlite::Result<String> = self.conn.query_row(
+            "SELECT content FROM clips ORDER BY created_at DESC LIMIT 1",
+            [],
             |row| row.get(0),
-        )?;
-        Ok(count > 0)
+        );
+        match result {
+            Ok(last) => Ok(last == content),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false),
+            Err(e) => Err(e),
+        }
     }
 }
 

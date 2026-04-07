@@ -1,29 +1,54 @@
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use iced::{
-    widget::{
-        button, column, container, row, scrollable, text, text_input, Column,
-        image as iced_image,
-    },
-    Alignment, Application, Color, Element, Length, Settings, Size, Task, Theme,
+    event, keyboard,
+    widget::{column, container, image as iced_image, row, scrollable, text, text_input, Column},
+    Alignment, Background, Border, Color, Element, Event, Length, Size, Subscription, Task, Theme,
 };
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 
 use crate::db::{ClipEntry, ClipKind, Db};
 
-// ─── Public entry point ───────────────────────────────────────────────────────
+// ─── Clipboard helper ─────────────────────────────────────────────────────────
+// On Wayland, arboard loses content when the window closes because the app
+// must stay alive to "serve" the clipboard. wl-copy solves this by forking
+// a background process that keeps the content alive. xclip is the X11 fallback.
 
-pub fn run(db: Arc<Mutex<Db>>) -> iced::Result {
-    ClipApp::run(Settings {
-        window: iced::window::Settings {
-            size: Size::new(520.0, 600.0),
-            resizable: true,
-            decorations: true,
-            ..Default::default()
-        },
-        flags: db,
-        ..Default::default()
-    })
+fn copy_text(text: &str) {
+    // 1. wl-copy (Wayland — background process keeps clipboard alive after exit)
+    if std::process::Command::new("wl-copy")
+        .arg(text)
+        .spawn()
+        .is_ok()
+    {
+        return;
+    }
+    // 2. xclip (X11 fallback)
+    if let Ok(mut child) = std::process::Command::new("xclip")
+        .args(["-selection", "clipboard"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+    {
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(text.as_bytes());
+        }
+        return;
+    }
+    // 3. arboard last resort (works on X11; may lose content on Wayland at exit)
+    if let Ok(mut cb) = arboard::Clipboard::new() {
+        let _ = cb.set_text(text.to_string());
+    }
 }
+
+// ─── Palette ──────────────────────────────────────────────────────────────────
+
+const BG: Color = Color::from_rgb(0.10, 0.10, 0.11);
+const SURFACE: Color = Color::from_rgb(0.14, 0.14, 0.16);
+const SELECTED: Color = Color::from_rgb(0.17, 0.33, 0.55);
+const BORDER: Color = Color::from_rgb(0.22, 0.22, 0.24);
+const TEXT_DIM: Color = Color::from_rgb(0.42, 0.42, 0.46);
+const TEXT_MAIN: Color = Color::from_rgb(0.88, 0.88, 0.90);
+const ACCENT: Color = Color::from_rgb(0.28, 0.56, 1.0);
 
 // ─── Messages ─────────────────────────────────────────────────────────────────
 
@@ -31,205 +56,286 @@ pub fn run(db: Arc<Mutex<Db>>) -> iced::Result {
 pub enum Msg {
     Loaded(Vec<ClipEntry>),
     SearchChanged(String),
-    CopyItem(i64),
-    TogglePin(i64),
-    DeleteItem(i64),
-    ClearHistory,
-    Refresh,
-    Noop,
+    SelectNext,
+    SelectPrev,
+    CopySelected,
+    DeleteSelected,
+    PinSelected,
+    Close,
+    EventOccurred(Event),
 }
 
-// ─── Application state ────────────────────────────────────────────────────────
+// ─── State ────────────────────────────────────────────────────────────────────
 
-struct ClipApp {
-    db: Arc<Mutex<Db>>,
-    entries: Vec<ClipEntry>,
-    search: String,
+pub struct ClipApp {
+    pub db: Arc<Mutex<Db>>,
+    pub entries: Vec<ClipEntry>,
+    pub search: String,
+    pub selected: usize,
 }
 
-impl Application for ClipApp {
-    type Executor = iced::executor::Default;
-    type Message = Msg;
-    type Theme = Theme;
-    type Flags = Arc<Mutex<Db>>;
-
-    fn new(db: Self::Flags) -> (Self, Task<Msg>) {
+impl ClipApp {
+    pub fn new(db: Arc<Mutex<Db>>) -> (Self, Task<Msg>) {
         let app = ClipApp {
             db: db.clone(),
             entries: vec![],
             search: String::new(),
+            selected: 0,
         };
         (app, Task::perform(load_entries(db), Msg::Loaded))
     }
 
-    fn title(&self) -> String {
-        "Clipboard Manager".into()
+    fn filtered(&self) -> Vec<&ClipEntry> {
+        let q = self.search.to_lowercase();
+        self.entries
+            .iter()
+            .filter(|e| q.is_empty() || e.preview.to_lowercase().contains(&q))
+            .collect()
     }
 
-    fn update(&mut self, msg: Msg) -> Task<Msg> {
+    pub fn update(&mut self, msg: Msg) -> Task<Msg> {
         match msg {
             Msg::Loaded(entries) => {
                 self.entries = entries;
+                self.selected = 0;
                 Task::none()
             }
             Msg::SearchChanged(s) => {
                 self.search = s;
+                self.selected = 0;
                 Task::none()
             }
-            Msg::CopyItem(id) => {
-                if let Some(entry) = self.entries.iter().find(|e| e.id == id) {
+            Msg::SelectNext => {
+                let max = self.filtered().len().saturating_sub(1);
+                self.selected = (self.selected + 1).min(max);
+                Task::none()
+            }
+            Msg::SelectPrev => {
+                self.selected = self.selected.saturating_sub(1);
+                Task::none()
+            }
+            Msg::CopySelected => {
+                if let Some(entry) = self.filtered().get(self.selected).copied() {
                     if entry.kind == ClipKind::Text {
-                        if let Ok(mut cb) = arboard::Clipboard::new() {
-                            let _ = cb.set_text(entry.content.clone());
-                        }
+                        copy_text(&entry.content);
                     }
                 }
-                Task::none()
+                iced::exit()
             }
-            Msg::TogglePin(id) => {
-                if let Ok(db) = self.db.lock() {
-                    let _ = db.toggle_pin(id);
+            Msg::DeleteSelected => {
+                if let Some(entry) = self.filtered().get(self.selected).copied() {
+                    let id = entry.id;
+                    if let Ok(db) = self.db.lock() {
+                        let _ = db.delete(id);
+                    }
                 }
                 Task::perform(load_entries(self.db.clone()), Msg::Loaded)
             }
-            Msg::DeleteItem(id) => {
-                if let Ok(db) = self.db.lock() {
-                    let _ = db.delete(id);
+            Msg::PinSelected => {
+                if let Some(entry) = self.filtered().get(self.selected).copied() {
+                    let id = entry.id;
+                    if let Ok(db) = self.db.lock() {
+                        let _ = db.toggle_pin(id);
+                    }
                 }
                 Task::perform(load_entries(self.db.clone()), Msg::Loaded)
             }
-            Msg::ClearHistory => {
-                if let Ok(db) = self.db.lock() {
-                    let _ = db.clear_unpinned();
+            Msg::Close => iced::exit(),
+            Msg::EventOccurred(Event::Keyboard(keyboard::Event::KeyPressed { key, .. })) => {
+                match key {
+                    keyboard::Key::Named(keyboard::key::Named::ArrowDown) => {
+                        self.update(Msg::SelectNext)
+                    }
+                    keyboard::Key::Named(keyboard::key::Named::ArrowUp) => {
+                        self.update(Msg::SelectPrev)
+                    }
+                    keyboard::Key::Named(keyboard::key::Named::Enter) => {
+                        self.update(Msg::CopySelected)
+                    }
+                    keyboard::Key::Named(keyboard::key::Named::Delete) => {
+                        self.update(Msg::DeleteSelected)
+                    }
+                    keyboard::Key::Named(keyboard::key::Named::Escape) => {
+                        self.update(Msg::Close)
+                    }
+                    keyboard::Key::Character(c) if c.as_str() == "p" => {
+                        self.update(Msg::PinSelected)
+                    }
+                    _ => Task::none(),
                 }
-                Task::perform(load_entries(self.db.clone()), Msg::Loaded)
             }
-            Msg::Refresh => Task::perform(load_entries(self.db.clone()), Msg::Loaded),
-            Msg::Noop => Task::none(),
+            Msg::EventOccurred(_) => Task::none(),
         }
     }
 
-    fn view(&self) -> Element<Msg> {
-        let search_bar = text_input("Search clips…", &self.search)
-            .on_input(Msg::SearchChanged)
-            .padding(10);
-
-        let query = self.search.to_lowercase();
-        let filtered: Vec<&ClipEntry> = self
-            .entries
-            .iter()
-            .filter(|e| query.is_empty() || e.preview.to_lowercase().contains(&query))
-            .collect();
-
-        let items: Column<Msg> = filtered
-            .iter()
-            .fold(Column::new().spacing(6).padding(8), |col, entry| {
-                col.push(entry_card(entry))
-            });
-
-        let content = column![
-            // Header
-            container(
-                row![
-                    text("Clipboard Manager").size(20).width(Length::Fill),
-                    button("Clear All")
-                        .on_press(Msg::ClearHistory)
-                        .style(iced::theme::Button::Destructive),
-                ]
-                .align_y(Alignment::Center)
-                .padding(12)
-                .spacing(8)
-            )
-            .style(iced::theme::Container::Box),
-            // Search
-            container(search_bar).padding([8, 12]),
-            // Clip list
-            scrollable(items).height(Length::Fill),
-            // Footer
-            container(
-                text(format!("{} item(s)", filtered.len()))
-                    .size(12)
-                    .color(Color::from_rgb(0.5, 0.5, 0.5))
-            )
-            .padding([4, 12]),
-        ]
-        .width(Length::Fill)
-        .height(Length::Fill);
-
-        container(content)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+    pub fn subscription(&self) -> Subscription<Msg> {
+        event::listen().map(Msg::EventOccurred)
     }
 
-    fn theme(&self) -> Theme {
+    pub fn view(&self) -> Element<'_, Msg> {
+        let filtered = self.filtered();
+
+        // Search bar
+        let search = container(
+            text_input("Search clipboard…", &self.search)
+                .on_input(Msg::SearchChanged)
+                .padding([9, 12])
+                .size(14)
+                .style(|_theme, _status| iced::widget::text_input::Style {
+                    background: Background::Color(SURFACE),
+                    border: Border {
+                        color: BORDER,
+                        width: 1.0,
+                        radius: 6.0.into(),
+                    },
+                    icon: TEXT_DIM,
+                    placeholder: TEXT_DIM,
+                    value: TEXT_MAIN,
+                    selection: SELECTED,
+                }),
+        )
+        .padding(iced::Padding { top: 10.0, right: 12.0, bottom: 6.0, left: 12.0 });
+
+        // Item list
+        let items: Column<Msg> =
+            filtered
+                .iter()
+                .enumerate()
+                .fold(Column::new().spacing(2).padding(iced::Padding { top: 0.0, right: 8.0, bottom: 8.0, left: 8.0 }), |col, (i, entry)| {
+                    col.push(clip_row(entry, i == self.selected))
+                });
+
+        // Hint bar
+        let hints = container(
+            row![
+                hint("↑↓", "navigate"),
+                hint("↵", "copy"),
+                hint("Del", "delete"),
+                hint("P", "pin"),
+                hint("Esc", "close"),
+            ]
+            .spacing(16)
+            .align_y(Alignment::Center),
+        )
+        .padding([5, 12])
+        .width(Length::Fill)
+        .style(|_theme| container::Style {
+            background: Some(Background::Color(SURFACE)),
+            border: Border {
+                color: BORDER,
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        });
+
+        container(
+            column![
+                search,
+                scrollable(items).height(Length::Fill),
+                hints,
+            ]
+            .width(Length::Fill)
+            .height(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_theme| container::Style {
+            background: Some(Background::Color(BG)),
+            ..Default::default()
+        })
+        .into()
+    }
+
+    pub fn theme(&self) -> Theme {
         Theme::Dark
     }
 }
 
-// ─── Entry card widget ────────────────────────────────────────────────────────
+// ─── Entry point ─────────────────────────────────────────────────────────────
 
-fn entry_card(entry: &ClipEntry) -> Element<Msg> {
-    let pin_label = if entry.pinned { "Unpin" } else { "Pin" };
-    let time_str = entry.created_at.format("%H:%M").to_string();
+pub fn run(db: Arc<Mutex<Db>>) -> iced::Result {
+    iced::application("Clipboard", ClipApp::update, ClipApp::view)
+        .theme(ClipApp::theme)
+        .subscription(ClipApp::subscription)
+        .window(iced::window::Settings {
+            size: Size::new(440.0, 520.0),
+            resizable: false,
+            decorations: true,
+            ..Default::default()
+        })
+        .run_with(move || ClipApp::new(db.clone()))
+}
 
-    let content_preview: Element<Msg> = match entry.kind {
-        ClipKind::Text => text(&entry.preview).size(14).width(Length::Fill).into(),
+// ─── Clip row ─────────────────────────────────────────────────────────────────
+
+fn clip_row(entry: &ClipEntry, selected: bool) -> Element<'_, Msg> {
+    let preview: Element<Msg> = match entry.kind {
+        ClipKind::Text => text(&entry.preview)
+            .size(13)
+            .color(TEXT_MAIN)
+            .width(Length::Fill)
+            .into(),
         ClipKind::Image => match B64.decode(&entry.content) {
-            Ok(bytes) => {
-                let handle = iced_image::Handle::from_bytes(bytes);
-                iced_image::Image::new(handle)
-                    .width(Length::Fixed(120.0))
-                    .height(Length::Fixed(80.0))
-                    .into()
-            }
-            Err(_) => text("[Invalid image]").size(14).into(),
+            Ok(bytes) => iced_image::Image::new(iced_image::Handle::from_bytes(bytes))
+                .width(Length::Fixed(80.0))
+                .height(Length::Fixed(48.0))
+                .into(),
+            Err(_) => text("[image]").size(13).color(TEXT_DIM).into(),
         },
     };
 
-    let id = entry.id;
-    let copy_btn = if entry.kind == ClipKind::Text {
-        button("Copy")
-            .on_press(Msg::CopyItem(id))
-            .style(iced::theme::Button::Primary)
+    let pin_dot: Element<Msg> = if entry.pinned {
+        text("●").size(8).color(ACCENT).into()
     } else {
-        button("Copy").style(iced::theme::Button::Secondary)
+        text("").size(8).into()
     };
 
-    let pin_style = if entry.pinned {
-        iced::theme::Button::Positive
-    } else {
-        iced::theme::Button::Secondary
-    };
+    let time = text(entry.created_at.format("%H:%M").to_string())
+        .size(11)
+        .color(TEXT_DIM);
 
-    container(
-        row![
-            column![
-                content_preview,
-                text(&time_str)
-                    .size(11)
-                    .color(Color::from_rgb(0.5, 0.5, 0.5)),
-            ]
-            .spacing(2)
-            .width(Length::Fill),
-            column![
-                copy_btn,
-                button(pin_label)
-                    .on_press(Msg::TogglePin(id))
-                    .style(pin_style),
-                button("✕")
-                    .on_press(Msg::DeleteItem(id))
-                    .style(iced::theme::Button::Destructive),
-            ]
-            .spacing(4)
-            .align_x(Alignment::End),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center)
-        .padding(8),
-    )
-    .style(iced::theme::Container::Box)
-    .width(Length::Fill)
+    let inner = row![
+        pin_dot,
+        preview,
+        column![time].align_x(Alignment::End),
+    ]
+    .spacing(6)
+    .align_y(Alignment::Center)
+    .padding([7, 10]);
+
+    container(inner)
+        .width(Length::Fill)
+        .style(move |_theme| container::Style {
+            background: Some(Background::Color(if selected { SELECTED } else { SURFACE })),
+            border: Border {
+                color: if selected { ACCENT } else { Color::TRANSPARENT },
+                width: if selected { 1.0 } else { 0.0 },
+                radius: 6.0.into(),
+            },
+            ..Default::default()
+        })
+        .into()
+}
+
+// ─── Hint widget ──────────────────────────────────────────────────────────────
+
+fn hint<'a>(key: &'a str, label: &'a str) -> Element<'a, Msg> {
+    row![
+        container(text(key).size(11).color(TEXT_MAIN))
+            .style(|_theme| container::Style {
+                background: Some(Background::Color(BORDER)),
+                border: Border {
+                    radius: 3.0.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .padding([1, 5]),
+        text(label).size(11).color(TEXT_DIM),
+    ]
+    .spacing(4)
+    .align_y(Alignment::Center)
     .into()
 }
 
