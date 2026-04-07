@@ -2,7 +2,7 @@
 Name=Clipboard Manager
 Comment=Start clipboard manager daemon on login
 Exec=clipmgr
-Icon=clipmgr
+Icon=edit-paste
 Type=Application
 X-GNOME-Autostart-enabled=true
 X-GNOME-Autostart-Delay=3

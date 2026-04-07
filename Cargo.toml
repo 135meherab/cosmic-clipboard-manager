@@ -25,8 +25,6 @@ assets = [
     ["desktop/clipmgr.desktop", "usr/share/applications/clipmgr.desktop", "644"],
     # Autostart entry (starts daemon on login)
     ["desktop/clipmgr-autostart.desktop", "etc/xdg/autostart/clipmgr.desktop", "644"],
-    # Icon (hicolor scalable — used by launcher, tray, quick search)
-    ["assets/clipmgr.svg", "usr/share/icons/hicolor/scalable/apps/clipmgr.svg", "644"],
 ]
 maintainer-scripts = "desktop/"
 
